@@ -424,7 +424,9 @@ WHERE r.type = 'A'
         if not device_ids:
             return
         id_list = ", ".join(str(i) for i in device_ids[:100])
-        query = f"""
+
+        # Direct device-linked scores (SNMP, hypervisor, etc.)
+        device_query = f"""
 SELECT
   device_fk,
   discovery_type,
@@ -440,9 +442,38 @@ WHERE device_fk IN ({id_list})
 ORDER BY updated DESC NULLS LAST
 LIMIT 500
 """.strip()
+
+        # Ping Sweep attaches to the IP, not the device (device_fk is null).
+        ping_query = f"""
+SELECT
+  ip.device_fk AS device_fk,
+  ds.discovery_type,
+  ds.sub_type,
+  ds.current_mode,
+  ds.port,
+  ds.port_check,
+  ds.discovery_scores,
+  ds.status,
+  ds.updated
+FROM view_discoveryscores_v1 ds
+JOIN view_ipaddress_v1 ip ON ip.ipaddress_pk = ds.ipaddress_fk
+WHERE ip.device_fk IN ({id_list})
+  AND ds.sub_type = 'Ping Sweep'
+  AND lower(COALESCE(ds.status, '')) = 'ok'
+ORDER BY ds.updated DESC NULLS LAST
+LIMIT 200
+""".strip()
+
+        rows: list[dict[str, Any]] = []
         try:
-            rows = self.client.doql(query)
+            rows.extend(self.client.doql(device_query))
         except Device42Error:
+            pass
+        try:
+            rows.extend(self.client.doql(ping_query))
+        except Device42Error:
+            pass
+        if not rows:
             return
 
         by_device: dict[int, list[str]] = {}
@@ -462,6 +493,11 @@ LIMIT 500
             if hit.kind != "device" or hit.object_id is None:
                 continue
             sources = by_device.get(hit.object_id) or []
+            # Prefer ICMP/ping near the front when present
+            sources = sorted(
+                sources,
+                key=lambda s: (0 if s == "ICMP/ping" else 1, s.lower()),
+            )
             hit.sources = sources[:6]
 
     def _rest_fallback(self, term: str, limit: int, hits: dict[str, InventoryHit]) -> None:
