@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .client import Device42Client, Device42Error, looks_like_ip, sql_literal
+from .client import Device42Client, Device42Error, like_literal, looks_like_ip, sql_literal
 
 
 @dataclass
@@ -229,7 +229,7 @@ class AssetSearcher:
         return ranked[:limit]
 
     def _search_devices(self, term: str, limit: int) -> list[InventoryHit]:
-        lit = sql_literal(term.lower())
+        lit = like_literal(term.lower())
         query = f"""
 SELECT
   d.device_pk AS object_id,
@@ -246,9 +246,9 @@ SELECT
 FROM view_device_v2 d
 LEFT JOIN view_ipaddress_v1 i ON i.device_fk = d.device_pk
 LEFT JOIN view_devicealias_v1 a ON a.device_fk = d.device_pk
-WHERE lower(d.name) LIKE '%{lit}%'
-   OR lower(COALESCE(a.alias_name, '')) LIKE '%{lit}%'
-   OR CAST(i.ip_address AS text) LIKE '%{lit}%'
+WHERE lower(d.name) LIKE '%{lit}%' ESCAPE '\\'
+   OR lower(COALESCE(a.alias_name, '')) LIKE '%{lit}%' ESCAPE '\\'
+   OR CAST(i.ip_address AS text) LIKE '%{lit}%' ESCAPE '\\'
 GROUP BY
   d.device_pk, d.name, d.type, d.os_name, d.service_level, d.in_service,
   d.last_discovered, d.last_changed
@@ -279,15 +279,15 @@ SELECT
   CAST(NULL AS text) AS preferred_aliases
 FROM view_device_v1 d
 LEFT JOIN view_ipaddress_v1 i ON i.device_fk = d.device_pk
-WHERE lower(d.name) LIKE '%{lit}%'
-   OR CAST(i.ip_address AS text) LIKE '%{lit}%'
+WHERE lower(d.name) LIKE '%{lit}%' ESCAPE '\\'
+   OR CAST(i.ip_address AS text) LIKE '%{lit}%' ESCAPE '\\'
 GROUP BY d.device_pk, d.name, d.type, d.os_name, d.service_level, d.in_service, d.last_changed
 ORDER BY d.name
 LIMIT {int(limit)}
 """.strip()
 
     def _search_assets(self, term: str, limit: int) -> list[InventoryHit]:
-        lit = sql_literal(term.lower())
+        lit = like_literal(term.lower())
         query = f"""
 SELECT
   a.asset_pk AS object_id,
@@ -303,9 +303,9 @@ SELECT
   CAST(NULL AS text) AS preferred_aliases
 FROM view_asset_v1 a
 LEFT JOIN view_assettype_v1 t ON t.assettype_pk = a.assettype_fk
-WHERE lower(a.name) LIKE '%{lit}%'
-   OR lower(COALESCE(a.serial_no, '')) LIKE '%{lit}%'
-   OR lower(COALESCE(a.asset_no, '')) LIKE '%{lit}%'
+WHERE lower(a.name) LIKE '%{lit}%' ESCAPE '\\'
+   OR lower(COALESCE(a.serial_no, '')) LIKE '%{lit}%' ESCAPE '\\'
+   OR lower(COALESCE(a.asset_no, '')) LIKE '%{lit}%' ESCAPE '\\'
 ORDER BY a.name
 LIMIT {int(limit)}
 """.strip()
@@ -501,15 +501,33 @@ LIMIT 200
             hit.sources = sources[:6]
 
     def _rest_fallback(self, term: str, limit: int, hits: dict[str, InventoryHit]) -> None:
+        needle = term.lower()
+
+        def _name_matches(name: str) -> bool:
+            return needle in (name or "").lower()
+
         try:
             for device in self.client.search_devices_by_name(term, limit):
+                name = str(device.get("name") or "")
+                if not _name_matches(name):
+                    continue
                 hit = self._hit_from_rest_device(device)
                 self._merge(hits, hit)
         except Device42Error:
             pass
 
         try:
+            # Device42 asset ?name= often ignores the filter and returns everything.
             for asset in self.client.search_assets_by_name(term, limit):
+                name = str(asset.get("name") or "")
+                serial = str(asset.get("serial_no") or "")
+                asset_no = str(asset.get("asset_no") or "")
+                if not (
+                    _name_matches(name)
+                    or needle in serial.lower()
+                    or needle in asset_no.lower()
+                ):
+                    continue
                 hit = self._hit_from_rest_asset(asset)
                 self._merge(hits, hit)
         except Device42Error:

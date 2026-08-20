@@ -36,6 +36,16 @@ def sql_literal(value: str) -> str:
     return value.replace("'", "''")
 
 
+def like_literal(value: str) -> str:
+    """Escape a value for use inside a DOQL LIKE pattern (also escapes % and _)."""
+    return (
+        sql_literal(value)
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
 class Device42Client:
     """
     Device42 client using API Client Token Auth.
@@ -181,7 +191,7 @@ class Device42Client:
             "/api/1.0/devices/",
             params={"name": term, "limit": limit, "offset": 0},
         )
-        return list(payload.get("Devices", {}).get("devices", []) or payload.get("devices", []))
+        return _list_from_payload(payload, "Devices", "devices")
 
     def search_ips(self, term: str, limit: int | None = None) -> list[dict]:
         """Search IP addresses (partial match supported by Device42)."""
@@ -191,7 +201,7 @@ class Device42Client:
             "/api/1.0/ips/",
             params={"ip": term, "limit": limit, "offset": 0},
         )
-        return list(payload.get("ips", []) or [])
+        return _list_from_payload(payload, "ips")
 
     def search_assets_by_name(self, term: str, limit: int | None = None) -> list[dict]:
         """Substring search on asset name via REST."""
@@ -201,8 +211,38 @@ class Device42Client:
             "/api/1.0/assets/",
             params={"name": term, "limit": limit, "offset": 0},
         )
-        return list(payload.get("assets", []) or [])
+        return _list_from_payload(payload, "assets")
 
     def get_device(self, device_id: int | str) -> dict:
         """Fetch a single device by id."""
         return self._request("GET", f"/api/1.0/devices/{device_id}/")
+
+
+def _list_from_payload(payload: Any, *keys: str) -> list[dict]:
+    """
+    Normalise Device42 list payloads.
+
+    Shapes seen in the wild:
+      {"devices": [...]}
+      {"Devices": {"devices": [...], "total_count": N}}
+      {"Devices": [...]}
+      [...]
+    """
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if not isinstance(payload, dict):
+        return []
+
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [row for row in value if isinstance(row, dict)]
+        if isinstance(value, dict):
+            nested = value.get(key.lower()) or value.get("devices") or value.get("assets") or value.get("ips")
+            if isinstance(nested, list):
+                return [row for row in nested if isinstance(row, dict)]
+            for nested_key in ("devices", "assets", "ips", "Objects", "objects"):
+                nested = value.get(nested_key)
+                if isinstance(nested, list):
+                    return [row for row in nested if isinstance(row, dict)]
+    return []
