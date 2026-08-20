@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+.env
+*.egg-info/
+
+# Sensitive files
+config.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,24 @@
+# Device42 API Configuration
+# Copy to config.ini and edit:
+#   cp config.ini.example config.ini
+#
+# Create credentials in Device42:
+#   Resources → Secrets → API Clients
+# Download client_key and secret_key from the new API Client.
+# User must be active and not Staff-enabled.
+
+[device42]
+# Base URL with scheme, no trailing slash
+# Example: https://device42.example.com
+url = https://YOUR-DEVICE42-HOST
+
+# From Resources → Secrets → API Clients
+client_key = YOUR_CLIENT_KEY
+secret_key = YOUR_SECRET_KEY
+
+# Verify TLS certificates (set false for lab / self-signed)
+verify_ssl = true
+
+[search]
+# Max rows returned from DOQL / API
+limit = 50
