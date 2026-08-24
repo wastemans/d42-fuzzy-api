@@ -63,4 +63,6 @@ python main.py --pick web01
 python main.py
 ```
 
+![CLI fuzzy search by hostname and IP](docs/cli-example.png)
+
 On Windows, use `python` or `py` the same way after activating `.venv`.
